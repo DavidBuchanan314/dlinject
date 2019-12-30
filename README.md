@@ -22,6 +22,14 @@ optional arguments:
               of SIGSTOP)
 ```
 
+# Why?
+
+- Because I can.
+
+- There are various [anti-ptrace techniques](https://www.aldeid.com/wiki/Ptrace-anti-debugging), which this evades by simply not using ptrace.
+
+- Using `LD_PRELOAD` can sometimes be fiddly or impossible, if the process you want to inject into is spawned by another process with a clean environment.
+
 # How it Works
 
 - Send the stop signal to the target process. (optional)
@@ -58,3 +66,5 @@ optional arguments:
 - `x86-64` Linux only (for now - 32-bit support could potentially be added).
 
 - Requires root, or relaxed YAMA configuration (`echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope` is useful when testing).
+
+- If the target process is sandboxed (e.g. seccomp filters), it might not have permission to `mmap()` the second stage shellcode, or to `dlopen()` the library.
