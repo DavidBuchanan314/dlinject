@@ -5,6 +5,8 @@ Inject a shared library (i.e. arbitrary code) into a live linux process, without
 
 # Usage
 
+Note: currently requires the python3 branch of [pwntools](https://github.com/Gallopsled/pwntools). It's a fairly heavyweight dependency that I only use a few features of, so I might be able to remove it in the future.
+
 ```
 usage: dlinject.py [-h] [--nostop] pid lib.so
 
