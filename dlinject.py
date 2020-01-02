@@ -1,35 +1,68 @@
 #!/usr/bin/env python3
 
+BANNER = r"""
+    .___.__  .__            __               __
+  __| _/|  | |__| ____     |__| ____   _____/  |_  ______ ___.__.
+ / __ | |  | |  |/    \    |  |/ __ \_/ ___\   __\ \____ <   |  |
+/ /_/ | |  |_|  |   |  \   |  \  ___/\  \___|  |   |  |_> >___  |
+\____ | |____/__|___|  /\__|  |\___  >\___  >__| /\|   __// ____|
+     \/              \/\______|    \/     \/     \/|__|   \/
+
+source: https://github.com/DavidBuchanan314/dlinject
+"""
+
 import argparse
 from pwn import *
 context.arch = "amd64"
 
 STACK_BACKUP_SIZE = 8*16
+STAGE2_SIZE = 0x8000
 
-def dlinject(pid, lib_path, dostop=True):
+def dlinject(pid, lib_path, stopmethod="sigstop"):
 
-	for line in open(f"/proc/{pid}/maps").readlines():
-		ld_path = line.split()[-1]
-		if re.match(r".*/ld-.*\.so", ld_path):
-			log.info("ld.so found: " + repr(ld_path))
-			ld = ELF(ld_path)
-			ld.address = int(line.split("-")[0], 16)
-			log.info("ld.so base: " + hex(ld.address))
-			log.info("_dl_open: " + hex(ld.sym["_dl_open"]))
-			break
-	else:
-		log.error("Couldn't find ld.so! (we need it for _dl_open)")
+	with open(f"/proc/{pid}/maps") as maps_file:
+		for line in maps_file.readlines():
+			ld_path = line.split()[-1]
+			if re.match(r".*/ld-.*\.so", ld_path):
+				ld_base = int(line.split("-")[0], 16)
+				break
+		else:
+			log.error("Couldn't find ld.so! (we need it for _dl_open)")
 
-	if dostop:
+	log.info("ld.so found: " + repr(ld_path))
+	ld = ELF(ld_path)
+	ld.address = ld_base
+	log.info("ld.so base: " + hex(ld.address))
+	log.info("_dl_open: " + hex(ld.sym["_dl_open"]))
+
+	if stopmethod == "sigstop":
+		log.info("Sending SIGSTOP")
 		os.kill(pid, signal.SIGSTOP)
-		
 		while True:
-			state = open(f"/proc/{pid}/stat").read().split(" ")[2]
+			with open(f"/proc/{pid}/stat") as stat_file:
+				state = stat_file.read().split(" ")[2]
 			if state in ["T", "t"]:
 				break
-			print("Waiting for process to stop...")
+			log.info("Waiting for process to stop...")
+			time.sleep(0.1)
+	elif stopmethod == "cgroup_freeze":
+		freeze_dir = "/sys/fs/cgroup/freezer/dlinject_" + os.urandom(8).hex()
+		os.mkdir(freeze_dir)
+		with open(freeze_dir+"/tasks", "w") as task_file:
+			task_file.write(str(pid))
+		with open(freeze_dir+"/freezer.state", "w") as state_file:
+			state_file.write("FROZEN\n")
+		while True:
+			with open(freeze_dir+"/freezer.state") as state_file:
+				if state_file.read().strip() == "FROZEN":
+					break
+			log.info("Waiting for process to freeze...")
+			time.sleep(0.1)
+	else:
+		log.warn("We're not going to stop the process first!")
 
-	syscall_vals = open(f"/proc/{pid}/syscall").read().split(" ")
+	with open(f"/proc/{pid}/syscall") as syscall_file:
+		syscall_vals = syscall_file.read().split(" ")
 	rip = int(syscall_vals[-1][2:], 16)
 	rsp = int(syscall_vals[-2][2:], 16)
 
@@ -63,18 +96,18 @@ def dlinject(pid, lib_path, dostop=True):
 		xor rsi, rsi        # flags (O_RDONLY)
 		xor rdx, rdx        # mode
 		syscall
-		mov r14, rax  # save the fd for later
+		mov r14, rax        # save the fd for later
 
 		// mmap it
-		mov rax, 9       # SYS_MMAP
-		xor rdi, rdi     # addr
-		mov rsi, 0x8000  # len
-		mov rdx, 0x7     # prot (rwx)
-		mov r10, 0x2     # flags (MAP_PRIVATE)
-		mov r8, r14      # fd
-		xor r9, r9       # off
+		mov rax, 9              # SYS_MMAP
+		xor rdi, rdi            # addr
+		mov rsi, {STAGE2_SIZE}  # len
+		mov rdx, 0x7            # prot (rwx)
+		mov r10, 0x2            # flags (MAP_PRIVATE)
+		mov r8, r14             # fd
+		xor r9, r9              # off
 		syscall
-		mov r15, rax     # save mmap addr
+		mov r15, rax            # save mmap addr
 
 		// close the file
 		mov rax, 3    # SYS_CLOSE
@@ -93,17 +126,18 @@ def dlinject(pid, lib_path, dostop=True):
 		.ascii "{stage2_path}\0"
 	""")
 
-	mem = open(f"/proc/{pid}/mem", "wb+")
+	with open(f"/proc/{pid}/mem", "wb+") as mem:
+		# back up the code we're about to overwrite
+		mem.seek(rip)
+		code_backup = mem.read(len(shellcode))
 
-	mem.seek(rip)
-	code_backup = mem.read(len(shellcode))
-	mem.seek(rsp-STACK_BACKUP_SIZE)
-	stack_backup = mem.read(STACK_BACKUP_SIZE)
+		# back up the part of the stack that the shellcode will clobber
+		mem.seek(rsp-STACK_BACKUP_SIZE)
+		stack_backup = mem.read(STACK_BACKUP_SIZE)
 
-	mem.seek(rip)
-	mem.write(shellcode)
-
-	mem.close()
+		# write the primary shellcode
+		mem.seek(rip)
+		mem.write(shellcode)
 
 	log.info("Wrote first stage shellcode")
 
@@ -212,16 +246,36 @@ def dlinject(pid, lib_path, dostop=True):
 
 	log.info(f"Wrote stage2 to {repr(stage2_path)}")
 
-	if dostop:
+	if stopmethod == "sigstop":
+		log.info("Continuing process...")
 		os.kill(pid, signal.SIGCONT)
+	elif stopmethod == "cgroup_freeze":
+		log.info("Thawing process...")
+		with open(freeze_dir+"/freezer.state", "w") as state_file:
+			state_file.write("THAWED\n")
+		#os.rmdir(freeze_dir) # XXX: This fails because there are still running tasks in the group?
 
 	log.success("Done!")
 
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description="Inject a shared library into a live process.")
-	parser.add_argument("pid", metavar="pid", type=int, help="target pid")
-	parser.add_argument("lib_path", metavar="lib.so", type=str, help="Path of the shared library to load (note: must be relative to the target process's cwd, or absolute)")
-	parser.add_argument("--nostop", action="store_true", help="Don't stop the target process prior to injection (race condition-y, but avoids potential side-effects of SIGSTOP)")
+	print(BANNER)
+
+	parser = argparse.ArgumentParser(
+		description="Inject a shared library into a live process.")
+
+	parser.add_argument("pid", metavar="pid", type=int, 
+		help="The pid of the target process")
+
+	parser.add_argument("lib_path", metavar="/path/to/lib.so", type=str,
+		help="Path of the shared library to load (note: must be relative to the \
+		      target process's cwd, or absolute)")
+
+	parser.add_argument("--stopmethod",
+		choices=["sigstop", "cgroup_freeze", "none"],
+		help="How to stop the target process prior to shellcode injection. \
+		      SIGSTOP (default) can have side-effects. cgroup freeze requires root. \
+		      'none' is likely to cause race conditions.")
+
 	args = parser.parse_args()
 
-	dlinject(args.pid, args.lib_path, not args.nostop)
+	dlinject(args.pid, args.lib_path, args.stopmethod or "sigstop")

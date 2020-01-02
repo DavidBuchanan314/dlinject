@@ -8,18 +8,33 @@ Inject a shared library (i.e. arbitrary code) into a live linux process, without
 Note: currently requires the python3 branch of [pwntools](https://github.com/Gallopsled/pwntools). It's a fairly heavyweight dependency that I only use a few features of, so I might be able to remove it in the future.
 
 ```
-usage: dlinject.py [-h] [--nostop] pid lib.so
+    .___.__  .__            __               __
+  __| _/|  | |__| ____     |__| ____   _____/  |_  ______ ___.__.
+ / __ | |  | |  |/    \    |  |/ __ \_/ ___\   __\ \____ <   |  |
+/ /_/ | |  |_|  |   |  \   |  \  ___/\  \___|  |   |  |_> >___  |
+\____ | |____/__|___|  /\__|  |\___  >\___  >__| /\|   __// ____|
+     \/              \/\______|    \/     \/     \/|__|   \/
+
+source: https://github.com/DavidBuchanan314/dlinject
+
+usage: dlinject.py [-h] [--stopmethod {sigstop,cgroup_freeze,none}]
+                   pid /path/to/lib.so
 
 Inject a shared library into a live process.
 
 positional arguments:
-  pid         target pid
-  lib.so      Path of the shared library to load (note: must be relative to the target process's cwd, or absolute)
+  pid                   The pid of the target process
+  /path/to/lib.so       Path of the shared library to load (note: must be
+                        relative to the target process's cwd, or absolute)
 
 optional arguments:
-  -h, --help  show this help message and exit
-  --nostop    Don't stop the target process prior to injection (race condition-y, but avoids potential side-effects
-              of SIGSTOP)
+  -h, --help            show this help message and exit
+  --stopmethod {sigstop,cgroup_freeze,none}
+                        How to stop the target process prior to shellcode
+                        injection. SIGSTOP (default) can have side-effects.
+                        cgroup freeze requires root. 'none' is likely to cause
+                        race conditions.
+
 ```
 
 # Why?
@@ -27,6 +42,8 @@ optional arguments:
 - Because I can.
 
 - There are various [anti-ptrace techniques](https://www.aldeid.com/wiki/Ptrace-anti-debugging), which this evades by simply not using ptrace.
+
+- I don't like ptrace.
 
 - Using `LD_PRELOAD` can sometimes be fiddly or impossible, if the process you want to inject into is spawned by another process with a clean environment.
 
