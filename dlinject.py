@@ -273,8 +273,7 @@ if __name__ == "__main__":
 		help="The pid of the target process")
 
 	parser.add_argument("lib_path", metavar="/path/to/lib.so", type=str,
-		help="Path of the shared library to load (note: must be relative to the \
-		      target process's cwd, or absolute)")
+		help="Path to the shared library we want to load")
 
 	parser.add_argument("--stopmethod",
 		choices=["sigstop", "cgroup_freeze", "none"],
@@ -284,4 +283,6 @@ if __name__ == "__main__":
 
 	args = parser.parse_args()
 
-	dlinject(args.pid, args.lib_path, args.stopmethod or "sigstop")
+	abs_path = os.path.abspath(args.lib_path)
+
+	dlinject(args.pid, abs_path, args.stopmethod or "sigstop")
