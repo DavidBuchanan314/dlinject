@@ -253,7 +253,13 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		log.info("Thawing process...")
 		with open(freeze_dir+"/freezer.state", "w") as state_file:
 			state_file.write("THAWED\n")
-		#os.rmdir(freeze_dir) # XXX: This fails because there are still running tasks in the group?
+		
+		# put the task back in the root cgroup
+		with open("/sys/fs/cgroup/freezer/tasks", "w") as task_file:
+			task_file.write(str(pid))
+		
+		# cleanup
+		os.rmdir(freeze_dir)
 
 	log.success("Done!")
 
