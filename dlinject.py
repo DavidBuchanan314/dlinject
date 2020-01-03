@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+f"Python version >= 3.6 required!"
+# ^^^ fstrings are valid since python 3.6, will sytax error otherwise
+
 BANNER = r"""
     .___.__  .__            __               __
   __| _/|  | |__| ____     |__| ____   _____/  |_  ______ ___.__.
@@ -11,9 +14,12 @@ BANNER = r"""
 source: https://github.com/DavidBuchanan314/dlinject
 """
 
+import os
+import sys
+import re
 import argparse
 from elftools.elf.elffile import ELFFile
-from pwn import *
+from pwn import asm, log, context
 context.arch = "amd64"
 
 STACK_BACKUP_SIZE = 8*16
@@ -295,7 +301,7 @@ if __name__ == "__main__":
 	parser.add_argument("--stopmethod",
 		choices=["sigstop", "cgroup_freeze", "none"],
 		help="How to stop the target process prior to shellcode injection. \
-		      SIGSTOP (default) can have side-effects. cgroup freeze requires root. \
+		      SIGSTOP (default) can have side-effects. cgroup freeze requires root.\
 		      'none' is likely to cause race conditions.")
 
 	args = parser.parse_args()
