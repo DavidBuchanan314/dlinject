@@ -12,14 +12,27 @@ source: https://github.com/DavidBuchanan314/dlinject
 """
 
 import argparse
+from elftools.elf.elffile import ELFFile
 from pwn import *
 context.arch = "amd64"
 
 STACK_BACKUP_SIZE = 8*16
 STAGE2_SIZE = 0x8000
 
-def dlinject(pid, lib_path, stopmethod="sigstop"):
 
+def lookup_elf_symbol(elf_name, sym_name):
+	with open(elf_name, "rb") as elf_file:
+		elf = ELFFile(elf_file)
+		symtab = elf.get_section_by_name(".symtab")
+		if not symtab:
+			return None
+		syms = symtab.get_symbol_by_name(sym_name)
+		if not syms:
+			return None
+		return syms[0].entry.st_value
+
+
+def dlinject(pid, lib_path, stopmethod="sigstop"):
 	with open(f"/proc/{pid}/maps") as maps_file:
 		for line in maps_file.readlines():
 			ld_path = line.split()[-1]
@@ -30,10 +43,14 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 			log.error("Couldn't find ld.so! (we need it for _dl_open)")
 
 	log.info("ld.so found: " + repr(ld_path))
-	ld = ELF(ld_path)
-	ld.address = ld_base
-	log.info("ld.so base: " + hex(ld.address))
-	log.info("_dl_open: " + hex(ld.sym["_dl_open"]))
+	log.info("ld.so base: " + hex(ld_base))
+	dl_open_offset = lookup_elf_symbol(ld_path, "_dl_open")
+
+	if not dl_open_offset:
+		log.error("Unable to locate _dl_open symbol")
+
+	dl_open_addr = ld_base + dl_open_offset
+	log.info("_dl_open: " + hex(dl_open_addr))
 
 	if stopmethod == "sigstop":
 		log.info("Sending SIGSTOP")
@@ -191,7 +208,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		lea rdi, lib_path[rip]  # file
 		mov rsi, 2              # mode (RTLD_NOW)
 		xor rcx, rcx            # nsid (LM_ID_BASE) (could maybe use LM_ID_NEWLM (-1))
-		mov rax, {ld.sym["_dl_open"]}
+		mov rax, {dl_open_addr}
 		call rax
 
 		fxrstor moar_regs[rip]
