@@ -76,7 +76,7 @@ optional arguments:
  
 # Limitations:
 
-- Sending `SIGSTOP` may cause unwanted side-effects, for example if another thread is waiting on `waitpid()`. The `--nostop` option avoids this, but introduces race conditions.
+- Sending `SIGSTOP` may cause unwanted side-effects, for example if another thread is waiting on `waitpid()`. The `--stopmethod=cgroup_freeze` option avoids this, but requires root (on most distros, at least).
 
 - I'm not entirely sure how this will interact with complex multi-threaded applications. There's certainly potential for breakage.
 
