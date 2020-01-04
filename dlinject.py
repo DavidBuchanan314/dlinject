@@ -14,10 +14,13 @@ BANNER = r"""
 source: https://github.com/DavidBuchanan314/dlinject
 """
 
-import os
-import sys
-import re
 import argparse
+import os
+import re
+import signal
+import sys
+import time
+
 from elftools.elf.elffile import ELFFile
 from pwn import asm, log, context
 context.arch = "amd64"
