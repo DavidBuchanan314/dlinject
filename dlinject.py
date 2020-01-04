@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 f"Python version >= 3.6 required!"
-# ^^^ fstrings are valid since python 3.6, will sytax error otherwise
+# ^^^ fstrings are valid since python 3.6, will syntax error otherwise
 
 BANNER = r"""
     .___.__  .__            __               __
@@ -18,14 +18,13 @@ import argparse
 import os
 import re
 import signal
-import sys
 import time
 
 from elftools.elf.elffile import ELFFile
 from pwn import asm, log, context
 context.arch = "amd64"
 
-STACK_BACKUP_SIZE = 8*16
+STACK_BACKUP_SIZE = 8 * 16
 STAGE2_SIZE = 0x8000
 
 
@@ -74,12 +73,12 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 	elif stopmethod == "cgroup_freeze":
 		freeze_dir = "/sys/fs/cgroup/freezer/dlinject_" + os.urandom(8).hex()
 		os.mkdir(freeze_dir)
-		with open(freeze_dir+"/tasks", "w") as task_file:
+		with open(freeze_dir + "/tasks", "w") as task_file:
 			task_file.write(str(pid))
-		with open(freeze_dir+"/freezer.state", "w") as state_file:
+		with open(freeze_dir + "/freezer.state", "w") as state_file:
 			state_file.write("FROZEN\n")
 		while True:
-			with open(freeze_dir+"/freezer.state") as state_file:
+			with open(freeze_dir + "/freezer.state") as state_file:
 				if state_file.read().strip() == "FROZEN":
 					break
 			log.info("Waiting for process to freeze...")
@@ -158,7 +157,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		code_backup = mem.read(len(shellcode))
 
 		# back up the part of the stack that the shellcode will clobber
-		mem.seek(rsp-STACK_BACKUP_SIZE)
+		mem.seek(rsp - STACK_BACKUP_SIZE)
 		stack_backup = mem.read(STACK_BACKUP_SIZE)
 
 		# write the primary shellcode
@@ -213,10 +212,10 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 
 		lea rsp, new_stack_base[rip-{STACK_BACKUP_SIZE}]
 
-		// call _dl_open (https://github.com/lattera/glibc/blob/895ef79e04a953cac1493863bcae29ad85657ee1/elf/dl-open.c#L529)
+		// call _dl_open (glibc/elf/dl-open.c)
 		lea rdi, lib_path[rip]  # file
 		mov rsi, 2              # mode (RTLD_NOW)
-		xor rcx, rcx            # nsid (LM_ID_BASE) (could maybe use LM_ID_NEWLM (-1))
+		xor rcx, rcx            # nsid (LM_ID_BASE) (could maybe use LM_ID_NEWLM)
 		mov rax, {dl_open_addr}
 		call rax
 
@@ -277,17 +276,18 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		os.kill(pid, signal.SIGCONT)
 	elif stopmethod == "cgroup_freeze":
 		log.info("Thawing process...")
-		with open(freeze_dir+"/freezer.state", "w") as state_file:
+		with open(freeze_dir + "/freezer.state", "w") as state_file:
 			state_file.write("THAWED\n")
-		
+
 		# put the task back in the root cgroup
 		with open("/sys/fs/cgroup/freezer/tasks", "w") as task_file:
 			task_file.write(str(pid))
-		
+
 		# cleanup
 		os.rmdir(freeze_dir)
 
 	log.success("Done!")
+
 
 if __name__ == "__main__":
 	print(BANNER)
@@ -295,7 +295,7 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser(
 		description="Inject a shared library into a live process.")
 
-	parser.add_argument("pid", metavar="pid", type=int, 
+	parser.add_argument("pid", metavar="pid", type=int,
 		help="The pid of the target process")
 
 	parser.add_argument("lib_path", metavar="/path/to/lib.so", type=str,
