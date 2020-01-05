@@ -5,8 +5,6 @@ Inject a shared library (i.e. arbitrary code) into a live linux process, without
 
 # Usage
 
-Note: currently requires the python3 branch of [pwntools](https://github.com/Gallopsled/pwntools). It's a fairly heavyweight dependency that I only use a few features of, so I might be able to remove it in the future.
-
 ```
     .___.__  .__            __               __
   __| _/|  | |__| ____     |__| ____   _____/  |_  ______ ___.__.
