@@ -19,10 +19,10 @@ import os
 import re
 import signal
 import time
+import subprocess
+from sys import stdout
 
 from elftools.elf.elffile import ELFFile
-from pwn import asm, log, context
-context.arch = "amd64"
 
 STACK_BACKUP_SIZE = 8 * 16
 STAGE2_SIZE = 0x8000
@@ -40,6 +40,52 @@ def lookup_elf_symbol(elf_name, sym_name):
 		return syms[0].entry.st_value
 
 
+def ansi_color(name):
+	color_codes = {
+		"blue": 34,
+		"red": 91,
+		"green": 32,
+		"default": 39,
+	}
+	return f"\x1b[{color_codes[name]}m"
+
+
+def log(msg, color="blue", symbol="*"):
+	line = "["
+	line += ansi_color(color)
+	line += symbol
+	line += ansi_color("default")
+	line += "] "
+	line += msg + "\n"
+	stdout.buffer.write(line.encode())
+
+
+def log_success(msg):
+	log(msg, "green", "+")
+
+
+def log_error(msg):
+	log(msg, "red", "!")
+	raise Exception(msg)
+
+
+def assemble(source):
+	cmd = "gcc -x assembler - -o /dev/stdout -nostdlib -Wl,--oformat=binary -m64"
+	argv = cmd.split(" ")
+	prefix = b".intel_syntax noprefix\n.globl _start\n_start:\n"
+
+	program = prefix + source.encode()
+	pipe = subprocess.PIPE
+
+	result = subprocess.run(argv, stdout=pipe, stderr=pipe, input=program)
+
+	if result.returncode != 0:
+		emsg = result.stderr.decode().strip()
+		log_error("Assembler command failed:\n\t" + emsg.replace("\n", "\n\t"))
+
+	return result.stdout
+
+
 def dlinject(pid, lib_path, stopmethod="sigstop"):
 	with open(f"/proc/{pid}/maps") as maps_file:
 		for line in maps_file.readlines():
@@ -48,27 +94,27 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 				ld_base = int(line.split("-")[0], 16)
 				break
 		else:
-			log.error("Couldn't find ld.so! (we need it for _dl_open)")
+			log_error("Couldn't find ld.so! (we need it for _dl_open)")
 
-	log.info("ld.so found: " + repr(ld_path))
-	log.info("ld.so base: " + hex(ld_base))
+	log("ld.so found: " + repr(ld_path))
+	log("ld.so base: " + hex(ld_base))
 	dl_open_offset = lookup_elf_symbol(ld_path, "_dl_open")
 
 	if not dl_open_offset:
-		log.error("Unable to locate _dl_open symbol")
+		log_error("Unable to locate _dl_open symbol")
 
 	dl_open_addr = ld_base + dl_open_offset
-	log.info("_dl_open: " + hex(dl_open_addr))
+	log("_dl_open: " + hex(dl_open_addr))
 
 	if stopmethod == "sigstop":
-		log.info("Sending SIGSTOP")
+		log("Sending SIGSTOP")
 		os.kill(pid, signal.SIGSTOP)
 		while True:
 			with open(f"/proc/{pid}/stat") as stat_file:
 				state = stat_file.read().split(" ")[2]
 			if state in ["T", "t"]:
 				break
-			log.info("Waiting for process to stop...")
+			log("Waiting for process to stop...")
 			time.sleep(0.1)
 	elif stopmethod == "cgroup_freeze":
 		freeze_dir = "/sys/fs/cgroup/freezer/dlinject_" + os.urandom(8).hex()
@@ -81,7 +127,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 			with open(freeze_dir + "/freezer.state") as state_file:
 				if state_file.read().strip() == "FROZEN":
 					break
-			log.info("Waiting for process to freeze...")
+			log("Waiting for process to freeze...")
 			time.sleep(0.1)
 	else:
 		log.warn("We're not going to stop the process first!")
@@ -91,12 +137,12 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 	rip = int(syscall_vals[-1][2:], 16)
 	rsp = int(syscall_vals[-2][2:], 16)
 
-	log.info(f"RIP: {hex(rip)}")
-	log.info(f"RSP: {hex(rsp)}")
+	log(f"RIP: {hex(rip)}")
+	log(f"RSP: {hex(rsp)}")
 
 	stage2_path = f"/tmp/stage2_{os.urandom(8).hex()}.bin"
 
-	shellcode = asm(fr"""
+	shellcode = assemble(fr"""
 		// push all the things
 		pushf
 		push rax
@@ -164,9 +210,9 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		mem.seek(rip)
 		mem.write(shellcode)
 
-	log.info("Wrote first stage shellcode")
+	log("Wrote first stage shellcode")
 
-	stage2 = asm(fr"""
+	stage2 = assemble(fr"""
 		cld
 
 		fxsave moar_regs[rip]
@@ -269,13 +315,13 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		os.chmod(stage2_path, 0o666)
 		stage2_file.write(stage2)
 
-	log.info(f"Wrote stage2 to {repr(stage2_path)}")
+	log(f"Wrote stage2 to {repr(stage2_path)}")
 
 	if stopmethod == "sigstop":
-		log.info("Continuing process...")
+		log("Continuing process...")
 		os.kill(pid, signal.SIGCONT)
 	elif stopmethod == "cgroup_freeze":
-		log.info("Thawing process...")
+		log("Thawing process...")
 		with open(freeze_dir + "/freezer.state", "w") as state_file:
 			state_file.write("THAWED\n")
 
@@ -286,7 +332,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		# cleanup
 		os.rmdir(freeze_dir)
 
-	log.success("Done!")
+	log_success("Done!")
 
 
 if __name__ == "__main__":
