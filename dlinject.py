@@ -20,7 +20,6 @@ import re
 import signal
 import time
 import subprocess
-from sys import stdout
 
 from elftools.elf.elffile import ELFFile
 
@@ -51,13 +50,7 @@ def ansi_color(name):
 
 
 def log(msg, color="blue", symbol="*"):
-	line = "["
-	line += ansi_color(color)
-	line += symbol
-	line += ansi_color("default")
-	line += "] "
-	line += msg + "\n"
-	stdout.buffer.write(line.encode())
+	print(f"[{ansi_color(color)}{symbol}{ansi_color('default')}] {msg}")
 
 
 def log_success(msg):
