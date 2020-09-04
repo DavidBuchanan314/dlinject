@@ -254,6 +254,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		// call _dl_open (glibc/elf/dl-open.c)
 		lea rdi, lib_path[rip]  # file
 		mov rsi, 2              # mode (RTLD_NOW)
+		mov rdx, {dl_open_addr} # caller_dlopen - needs to be "valid" on older libcs
 		xor rcx, rcx            # nsid (LM_ID_BASE) (could maybe use LM_ID_NEWLM)
 		mov rax, {dl_open_addr}
 		call rax
