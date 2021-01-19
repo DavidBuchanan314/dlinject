@@ -273,7 +273,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 		pop rbp
 		pop rdx
 		pop rcx
-		pop rdx
+		pop rbx
 		pop rax
 		popf
 
