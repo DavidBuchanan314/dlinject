@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 f"Python version >= 3.6 required!"
 # ^^^ fstrings are valid since python 3.6, will syntax error otherwise
 
