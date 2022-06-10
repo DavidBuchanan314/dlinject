@@ -27,7 +27,6 @@ STAGE2_SIZE = 0x8000
 
 
 def lookup_elf_symbol(elf_name, sym_name):
-    print(elf_name)
     with open(elf_name, "rb") as elf_file:
         elf = ELFFile(elf_file)
         symtab = elf.get_section_by_name(".dynsym")
