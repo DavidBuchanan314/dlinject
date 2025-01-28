@@ -16,7 +16,6 @@ source: https://github.com/DavidBuchanan314/dlinject
 
 import argparse
 import os
-import re
 import signal
 import time
 import subprocess
@@ -30,7 +29,7 @@ STAGE2_SIZE = 0x8000
 def lookup_elf_symbol(elf_name, sym_name):
 	with open(elf_name, "rb") as elf_file:
 		elf = ELFFile(elf_file)
-		symtab = elf.get_section_by_name(".symtab")
+		symtab = elf.get_section_by_name(".dynsym")
 		if not symtab:
 			return None
 		syms = symtab.get_symbol_by_name(sym_name)
@@ -62,8 +61,19 @@ def log_error(msg):
 	raise Exception(msg)
 
 
+def extract_text_segment(elf_file_path):
+	with open(elf_file_path, 'rb') as elf_file:
+		elf = ELFFile(elf_file)
+		text_section = elf.get_section_by_name('.text')
+
+		if not text_section:
+			log_error(f"Did not find .text section in {elf_file_path} .")
+
+		return text_section.data()
+
 def assemble(source):
-	cmd = "gcc -x assembler - -o /dev/stdout -nostdlib -Wl,--oformat=binary -m64"
+	tmp_elf = f"/tmp/tmpelf{os.urandom(8).hex()}"
+	cmd = f"gcc -x assembler - -o {tmp_elf} -nostdlib"
 	argv = cmd.split(" ")
 	prefix = b".intel_syntax noprefix\n.globl _start\n_start:\n"
 
@@ -76,28 +86,46 @@ def assemble(source):
 		emsg = result.stderr.decode().strip()
 		log_error("Assembler command failed:\n\t" + emsg.replace("\n", "\n\t"))
 
-	return result.stdout
+	data = extract_text_segment(tmp_elf)
+	os.unlink(tmp_elf)
+	return data
+
+
+def locate_dl_open(process_maps, mod_name):
+	fail = (False, None, None, None)
+	with open(process_maps) as maps_file:
+		for line in maps_file.readlines():
+			mod_path = line.split()[-1]
+			if mod_name in mod_path:
+				mod_base = int(line.split("-")[0], 16)
+				break
+		else:
+			return fail
+
+	if "libc" in mod_name:
+		dl_open_offset = lookup_elf_symbol(mod_path, "dlopen")
+	elif "ld-linux" in mod_name:
+		dl_open_offset = lookup_elf_symbol(mod_path, "_dl_open")
+	else:
+		return fail
+
+	return (True, mod_base, mod_path, dl_open_offset)
 
 
 def dlinject(pid, lib_path, stopmethod="sigstop"):
-	with open(f"/proc/{pid}/maps") as maps_file:
-		for line in maps_file.readlines():
-			ld_path = line.split()[-1]
-			if re.match(r".*/ld-.*\.so", ld_path):
-				ld_base = int(line.split("-")[0], 16)
-				break
-		else:
-			log_error("Couldn't find ld.so! (we need it for _dl_open)")
+	log("searching for dlopen...")
+	process_maps = f"/proc/{pid}/maps"
+	for mod in ["libc", "ld-linux"]:
+		status, mod_base, mod_path, dl_open_offset = locate_dl_open(process_maps, mod)
+		if status:
+			mod_name = mod
+			log(f"located dlopen in {mod_path} @ offset {hex(mod_base)}.")
+			break
+	else:
+		log_error("Unable to locate dlopen in either as either \"dlopen\" or \"_dl_open\"")
 
-	log("ld.so found: " + repr(ld_path))
-	log("ld.so base: " + hex(ld_base))
-	dl_open_offset = lookup_elf_symbol(ld_path, "_dl_open")
-
-	if not dl_open_offset:
-		log_error("Unable to locate _dl_open symbol")
-
-	dl_open_addr = ld_base + dl_open_offset
-	log("_dl_open: " + hex(dl_open_addr))
+	dl_open_addr = mod_base + dl_open_offset
+	log(f"{mod_name}: " + hex(dl_open_addr))
 
 	if stopmethod == "sigstop":
 		log("Sending SIGSTOP")
@@ -123,7 +151,7 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 			log("Waiting for process to freeze...")
 			time.sleep(0.1)
 	else:
-		log.warn("We're not going to stop the process first!")
+		log("We're not going to stop the process first!")
 
 	with open(f"/proc/{pid}/syscall") as syscall_file:
 		syscall_vals = syscall_file.read().split(" ")
@@ -304,6 +332,8 @@ def dlinject(pid, lib_path, stopmethod="sigstop"):
 
 	new_stack_base:
 	""")
+
+	log(f"stage2 len: {len(stage2)}")
 
 	with open(stage2_path, "wb") as stage2_file:
 		os.chmod(stage2_path, 0o666)
