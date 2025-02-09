@@ -130,3 +130,4 @@ dmypy.json
 
 example_prog/*.so
 example_prog/test
+example_prog/test_threaded
